@@ -1,30 +1,40 @@
-from typing import Dict, Any, Optional
+"""Physical Measurement + Uncertainty. Never guess a physical value — if no
+reliable calibration reference exists, report INCONCLUSIVE.
+"""
+BASE_UNCERTAINTY_MM = 0.08
 
 
-def calculate_font_measurements(
-    bbox_height_px: int,
-    reference_dimension_px: Optional[float] = None,
-    reference_dimension_mm: Optional[float] = None,
-) -> Dict[str, Any]:
-    """
-    Computes calibrated real-world font height (mm) and uncertainty interval.
-    If reference dimensions are provided (e.g. coin or card calibration target),
-    computes scale factor: px_per_mm.
-    """
-    if reference_dimension_px and reference_dimension_mm and reference_dimension_mm > 0:
-        px_per_mm = reference_dimension_px / reference_dimension_mm
-        estimated_height_mm = round(bbox_height_px / px_per_mm, 2)
-        # Uncertainty estimation (+/- 5% or pixel quantization error)
-        uncertainty_mm = round(max(0.1, 1.0 / px_per_mm), 2)
-    else:
-        # Default approximation based on standard DPI assumption (e.g., 300 DPI -> ~11.8 px/mm)
-        default_px_per_mm = 11.81
-        estimated_height_mm = round(bbox_height_px / default_px_per_mm, 2)
-        uncertainty_mm = 0.25
+def measure_with_reference(reference_width_mm: float, reference_width_px: int,
+                            target_height_px: int) -> dict:
+    if reference_width_px <= 0:
+        return {"status": "INCONCLUSIVE", "reason": "Invalid reference bounding box"}
+
+    px_to_mm = reference_width_mm / reference_width_px
+    value_mm = round(target_height_px * px_to_mm, 2)
 
     return {
-        "estimated_height_mm": estimated_height_mm,
-        "uncertainty_mm": uncertainty_mm,
-        "lower_bound_mm": round(estimated_height_mm - uncertainty_mm, 2),
-        "upper_bound_mm": round(estimated_height_mm + uncertainty_mm, 2),
+        "field": "TARGET_HEIGHT_MM",
+        "value": value_mm,
+        "uncertainty": BASE_UNCERTAINTY_MM,
+        "unit": "mm",
+        "calibration": "VALID",
+        "confidence": "HIGH" if BASE_UNCERTAINTY_MM < 0.1 else "MEDIUM",
     }
+
+
+def measure_without_reference() -> dict:
+    return {
+        "status": "INCONCLUSIVE",
+        "reason": "No reliable calibration reference found. Capture a photo "
+                  "with a known reference (ruler/calibration card) alongside "
+                  "the declaration to enable measurement.",
+    }
+
+
+def evaluate_against_threshold(value_mm: float, uncertainty_mm: float, threshold_mm: float) -> str:
+    low, high = value_mm - uncertainty_mm, value_mm + uncertainty_mm
+    if low > threshold_mm:
+        return "COMPLIANT"
+    if high < threshold_mm:
+        return "POTENTIAL_NON_COMPLIANCE"
+    return "INCONCLUSIVE"

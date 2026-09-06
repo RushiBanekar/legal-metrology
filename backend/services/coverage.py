@@ -1,31 +1,63 @@
-from typing import Dict, List, Any
-from ..models.schemas import CoverageStatus, DeclarationItem
+"""Evidence Coverage Engine — merges declaration extraction results across
+ALL images in a session into FOUND / UNCLEAR / MISSING / CONFLICT per field.
+"""
+from .declarations import required_fields_for_category
 
 
-def calculate_coverage(
-    declarations: Dict[str, DeclarationItem],
-    required_rules: List[Dict[str, Any]],
-) -> CoverageStatus:
-    """
-    Computes evidence coverage percentage based on mandatory fields found in session declarations.
-    """
-    required_fields = [r.get("field") for r in required_rules if r.get("required") and r.get("field")]
-    total_required = len(required_fields)
+def build_coverage(category: str, per_image_declarations: dict) -> dict:
+    required = required_fields_for_category(category)
+    coverage = {}
+    sources = {}
 
-    detected_count = 0
-    missing_fields = []
+    for field in required:
+        found_values = []
+        any_unclear = False
+        for image_id, decls in per_image_declarations.items():
+            entry = decls.get(field, {"value": None, "state": "MISSING"})
+            if entry["state"] == "FOUND" and entry["value"]:
+                found_values.append((image_id, entry["value"]))
+            elif entry["state"] == "UNCLEAR":
+                any_unclear = True
 
-    for field in required_fields:
-        if field in declarations and declarations[field].normalized_value is not None:
-            detected_count += 1
+        distinct_values = {v for _, v in found_values}
+
+        if len(distinct_values) > 1:
+            coverage[field] = "CONFLICT"
+            sources[field] = {
+                "competing_values": [{"image_id": i, "value": v} for i, v in found_values],
+                "selection_reason": "CONFLICT_REQUIRES_REVIEW — values disagree across images",
+            }
+        elif len(distinct_values) == 1:
+            image_id, value = found_values[0]
+            coverage[field] = "FOUND"
+            sources[field] = {"selected_value": value, "source_image": image_id,
+                               "selection_reason": "Only consistent value found"}
+        elif any_unclear:
+            coverage[field] = "UNCLEAR"
+            sources[field] = {"selection_reason": "Low OCR confidence on all candidate images"}
         else:
-            missing_fields.append(field)
+            coverage[field] = "MISSING"
+            sources[field] = {"selection_reason": "Not detected in any session image"}
 
-    coverage_pct = round((detected_count / total_required * 100.0), 1) if total_required > 0 else 100.0
+    return {"coverage": coverage, "sources": sources}
 
-    return CoverageStatus(
-        total_required_fields=total_required,
-        detected_fields=detected_count,
-        missing_fields=missing_fields,
-        coverage_percentage=coverage_pct,
-    )
+
+RECOMMENDED_VIEW = {
+    "MFG_DATE": "BACK",
+    "COUNTRY_OF_ORIGIN": "BACK",
+    "MRP": "FRONT",
+    "NET_QUANTITY": "FRONT",
+    "MANUFACTURER": "BACK",
+}
+
+
+def missing_evidence_list(coverage: dict) -> list:
+    out = []
+    for field, status in coverage.items():
+        if status in ("MISSING", "UNCLEAR"):
+            out.append({
+                "field": field,
+                "recommended_view": RECOMMENDED_VIEW.get(field, "OTHER"),
+                "tip": "Move closer, hold steady, avoid glare",
+            })
+    return out

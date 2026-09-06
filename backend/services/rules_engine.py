@@ -1,96 +1,82 @@
+"""Versioned Rule Engine — deterministic, no LLM in the compliance decision
+path. Rules live as structured JSON so historical findings stay reproducible.
+"""
 import json
 from pathlib import Path
-from typing import Dict, Any, List
-from ..models.schemas import RuleResult, EvaluationResponse, DeclarationItem
-from .evidence import generate_audit_hash
+
+# services/rules_engine.py -> backend/ -> legal-metrology/ -> rules/categories/
+RULES_DIR = Path(__file__).resolve().parents[2] / "rules" / "categories"
 
 
-class RulesEngine:
-    def __init__(self, rules_dir: Path):
-        self.rules_dir = rules_dir
-        self.rules_cache: Dict[str, Dict[str, Any]] = {}
+def load_rules(category: str) -> dict:
+    path = RULES_DIR / f"{category.lower()}.json"
+    if not path.exists():
+        return {"version": None, "rules": []}
+    with open(path, "r") as f:
+        return json.load(f)
 
-    def load_category_rules(self, category: str) -> Dict[str, Any]:
-        """Loads and caches category JSON rule set."""
-        if category in self.rules_cache:
-            return self.rules_cache[category]
 
-        rule_path = self.rules_dir / "categories" / f"{category}.json"
-        if not rule_path.exists():
-            raise FileNotFoundError(f"Rule definition not found for category: {category}")
+def evaluate_rules(category: str, coverage: dict, measurements: list) -> dict:
+    ruleset = load_rules(category)
+    findings = []
+    has_conflict = any(v == "CONFLICT" for v in coverage.values())
+    has_missing = any(v in ("MISSING", "UNCLEAR") for v in coverage.values())
+    has_non_compliance = False
 
-        with open(rule_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            self.rules_cache[category] = data
-            return data
+    for rule in ruleset.get("rules", []):
+        field = rule["evidence_required"]
+        status_for_field = coverage.get(field, "NOT_APPLICABLE")
 
-    def evaluate(
-        self,
-        session_id: str,
-        category: str,
-        declarations: Dict[str, DeclarationItem],
-    ) -> EvaluationResponse:
-        """
-        Executes deterministic rules evaluation against extracted declarations.
-        """
-        rule_set = self.load_category_rules(category)
-        mandatory_declarations = rule_set.get("mandatory_declarations", [])
+        if status_for_field == "NOT_APPLICABLE":
+            continue
+        if status_for_field in ("MISSING", "UNCLEAR", "CONFLICT"):
+            findings.append({
+                "rule_id": rule["rule_id"],
+                "requirement": rule["requirement"],
+                "status": "INCONCLUSIVE",
+                "evidence_image_id": "",
+                "explanation": f"Evidence for {field} is {status_for_field.lower()}.",
+            })
+            continue
 
-        rule_results: List[RuleResult] = []
-        passed_count = 0
-        failed_count = 0
-        warning_count = 0
+        threshold_field = rule.get("threshold_field")
+        if threshold_field:
+            m = next((m for m in measurements if m.get("field") == threshold_field), None)
+            if m is None or m.get("status") == "INCONCLUSIVE":
+                findings.append({
+                    "rule_id": rule["rule_id"], "requirement": rule["requirement"],
+                    "status": "INCONCLUSIVE", "evidence_image_id": "",
+                    "explanation": "No valid measurement available for this requirement.",
+                })
+                continue
+            from .measurement import evaluate_against_threshold
+            result = evaluate_against_threshold(m["value"], m["uncertainty"], rule["threshold"])
+            if result == "POTENTIAL_NON_COMPLIANCE":
+                has_non_compliance = True
+            findings.append({
+                "rule_id": rule["rule_id"], "requirement": rule["requirement"],
+                "status": result, "evidence_image_id": "",
+                "explanation": f"Measured {m['value']}±{m['uncertainty']}{m['unit']} vs threshold {rule['threshold']}{m['unit']}.",
+            })
+        else:
+            findings.append({
+                "rule_id": rule["rule_id"], "requirement": rule["requirement"],
+                "status": "COMPLIANT", "evidence_image_id": "",
+                "explanation": f"{field} declaration found and present.",
+            })
 
-        for rule in mandatory_declarations:
-            field = rule.get("field")
-            rule_id = rule.get("id", "UNKNOWN_RULE")
-            rule_name = rule.get("name", "Unnamed Rule")
-            severity = rule.get("severity", "MEDIUM")
+    if has_conflict or has_missing:
+        verdict, reason = "INCONCLUSIVE", "One or more required declarations are missing, unclear, or conflicting."
+    elif has_non_compliance:
+        verdict, reason = "POTENTIAL_NON_COMPLIANCE", "At least one requirement appears violated based on available evidence."
+    elif findings:
+        verdict, reason = "COMPLIANT", "All applicable requirements satisfied by available evidence."
+    else:
+        verdict, reason = "INCONCLUSIVE", "No applicable rules were evaluated."
 
-            if field in declarations and declarations[field].normalized_value is not None:
-                item = declarations[field]
-                status = "PASS"
-                evidence = f"Detected: {item.raw_text}"
-                details = f"Confidence: {item.confidence * 100:.0f}% on panel: {item.panel_type or 'unspecified'}"
-                passed_count += 1
-            else:
-                status = "FAIL"
-                evidence = "Declaration not detected across captured panels"
-                details = rule.get("description", "Missing mandatory declaration.")
-                failed_count += 1
-
-            rule_results.append(
-                RuleResult(
-                    rule_id=rule_id,
-                    rule_name=rule_name,
-                    status=status,
-                    severity=severity,
-                    evidence=evidence,
-                    details=details,
-                )
-            )
-
-        verdict = "COMPLIANT" if failed_count == 0 else "NON_COMPLIANT"
-        summary = {
-            "total_rules": len(mandatory_declarations),
-            "passed_rules": passed_count,
-            "failed_rules": failed_count,
-            "warning_rules": warning_count,
-        }
-
-        audit_payload = {
-            "session_id": session_id,
-            "category": category,
-            "verdict": verdict,
-            "summary": summary,
-            "rule_results": [r.model_dump() for r in rule_results],
-        }
-        audit_hash = generate_audit_hash(audit_payload)
-
-        return EvaluationResponse(
-            session_id=session_id,
-            verdict=verdict,
-            summary=summary,
-            rule_results=rule_results,
-            audit_hash=audit_hash,
-        )
+    return {
+        "rule_version": ruleset.get("version", "UNVERSIONED"),
+        "findings": findings,
+        "verdict": verdict,
+        "verdict_reason": reason,
+    }

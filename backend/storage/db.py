@@ -1,73 +1,67 @@
+"""Prototype storage: in-memory dict, mirrored to a JSON file so a demo
+restart doesn't lose everything.
+"""
 import json
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
-from datetime import datetime
-from ..models.schemas import SessionResponse, SessionCreateRequest
+from threading import Lock
+
+DATA_FILE = Path(__file__).resolve().parent / "sessions.json"
+_lock = Lock()
+_sessions: dict = {}
 
 
-class StorageDB:
-    def __init__(self, persistence_file: Optional[Path] = None):
-        self.persistence_file = persistence_file
-        self.sessions: Dict[str, SessionResponse] = {}
-        if self.persistence_file and self.persistence_file.exists():
-            self._load_from_disk()
+def _persist():
+    with open(DATA_FILE, "w") as f:
+        json.dump(_sessions, f, default=str, indent=2)
 
-    def _load_from_disk(self):
-        try:
-            with open(self.persistence_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                for sess_id, s_data in data.items():
-                    self.sessions[sess_id] = SessionResponse(**s_data)
-        except Exception:
-            pass
 
-    def _save_to_disk(self):
-        if not self.persistence_file:
-            return
-        try:
-            self.persistence_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.persistence_file, "w", encoding="utf-8") as f:
-                serialized = {k: v.model_dump(mode="json") for k, v in self.sessions.items()}
-                json.dump(serialized, f, indent=2, default=str)
-        except Exception:
-            pass
+def _load():
+    global _sessions
+    if DATA_FILE.exists():
+        with open(DATA_FILE, "r") as f:
+            _sessions = json.load(f)
 
-    def create_session(self, session_id: str, request: SessionCreateRequest) -> SessionResponse:
-        now = datetime.utcnow()
-        session = SessionResponse(
-            session_id=session_id,
-            category=request.category,
-            rule_version=request.rule_version,
-            status="in_progress",
-            created_at=now,
-            updated_at=now,
-            metadata=request.metadata,
-            images=[],
-            declarations={},
-        )
-        self.sessions[session_id] = session
-        self._save_to_disk()
-        return session
 
-    def get_session(self, session_id: str) -> Optional[SessionResponse]:
-        return self.sessions.get(session_id)
+_load()
 
-    def list_sessions(self) -> List[SessionResponse]:
-        return sorted(self.sessions.values(), key=lambda s: s.created_at, reverse=True)
 
-    def update_session(self, session: SessionResponse) -> SessionResponse:
-        session.updated_at = datetime.utcnow()
-        self.sessions[session.session_id] = session
-        self._save_to_disk()
+def new_id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:8]}"
+
+
+def create_session(inspector_id: str, location: str, category: str, product_identifier: str) -> dict:
+    with _lock:
+        session_id = new_id("sess")
+        session = {
+            "session_id": session_id,
+            "inspector_id": inspector_id,
+            "location": location,
+            "category": category,
+            "product_identifier": product_identifier,
+            "status": "CREATED",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "images": {},
+            "last_chain_hash": "sha256:" + "0" * 64,
+            "last_evaluation": None,
+        }
+        _sessions[session_id] = session
+        _persist()
         return session
 
 
-# Global singleton instance
-_db_instance: Optional[StorageDB] = None
+def get_session(session_id: str):
+    return _sessions.get(session_id)
 
 
-def get_db(persistence_path: Optional[Path] = None) -> StorageDB:
-    global _db_instance
-    if _db_instance is None:
-        _db_instance = StorageDB(persistence_file=persistence_path)
-    return _db_instance
+def add_image(session_id: str, image_id: str, record: dict):
+    with _lock:
+        _sessions[session_id]["images"][image_id] = record
+        _persist()
+
+
+def save_evaluation(session_id: str, evaluation: dict):
+    with _lock:
+        _sessions[session_id]["last_evaluation"] = evaluation
+        _persist()
