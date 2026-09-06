@@ -1,0 +1,98 @@
+{
+  "category": "packaged_food",
+  "version": "1.0.0",
+  "name": "Packaged Food & Beverages (Legal Metrology Compliance)",
+  "description": "Standard compliance rules for pre-packaged commodities under Legal Metrology Rules",
+  "mandatory_declarations": [
+    {
+      "id": "RULE_NAME_PRODUCT",
+      "name": "Generic or Common Name of Commodity",
+      "field": "commodity_name",
+      "severity": "CRITICAL",
+      "required": true,
+      "description": "The common or generic name of the packaged food commodity must be declared on the principal display panel."
+    },
+    {
+      "id": "RULE_NET_QUANTITY",
+      "name": "Net Quantity Declaration",
+      "field": "net_quantity",
+      "severity": "CRITICAL",
+      "required": true,
+      "allowed_units": ["g", "kg", "ml", "l"],
+      "description": "Net quantity must be declared in standard SI metric units (weight or volume)."
+    },
+    {
+      "id": "RULE_MRP",
+      "name": "Maximum Retail Price (MRP)",
+      "field": "mrp",
+      "severity": "CRITICAL",
+      "required": true,
+      "must_include_taxes_clause": true,
+      "description": "MRP must be clearly stated including words 'Inclusive of all taxes' or 'Incl. of all taxes'."
+    },
+    {
+      "id": "RULE_MFG_DATE",
+      "name": "Date of Manufacture or Packing",
+      "field": "mfg_date",
+      "severity": "HIGH",
+      "required": true,
+      "description": "Month and year of manufacture, packing, or import must be clearly indicated."
+    },
+    {
+      "id": "RULE_EXPIRY",
+      "name": "Best Before / Expiry Date",
+      "field": "expiry_date",
+      "severity": "HIGH",
+      "required": true,
+      "description": "Best before date or expiry period must be provided."
+    },
+    {
+      "id": "RULE_MANUFACTURER_DETAILS",
+      "name": "Name and Address of Manufacturer/Packer",
+      "field": "manufacturer_details",
+      "severity": "HIGH",
+      "required": true,
+      "description": "Full complete address with pin code and entity name."
+    },
+    {
+      "id": "RULE_CONSUMER_CARE",
+      "name": "Consumer Care Details",
+      "field": "consumer_care",
+      "severity": "HIGH",
+      "required": true,
+      "description": "Contact telephone number and email address for consumer grievances."
+    },
+    {
+      "id": "RULE_COUNTRY_OF_ORIGIN",
+      "name": "Country of Origin",
+      "field": "country_of_origin",
+      "severity": "MEDIUM",
+      "required": true,
+      "description": "Country of origin must be explicitly mentioned for imported or domestic goods."
+    }
+  ],
+  "font_size_standards": [
+    {
+      "max_net_weight_g": 200,
+      "min_font_height_mm": 1.0,
+      "tolerance_mm": 0.2
+    },
+    {
+      "min_net_weight_g": 200,
+      "max_net_weight_g": 500,
+      "min_font_height_mm": 2.0,
+      "tolerance_mm": 0.2
+    },
+    {
+      "min_net_weight_g": 500,
+      "max_net_weight_g": 1000,
+      "min_font_height_mm": 4.0,
+      "tolerance_mm": 0.3
+    },
+    {
+      "min_net_weight_g": 1000,
+      "min_font_height_mm": 6.0,
+      "tolerance_mm": 0.5
+    }
+  ]
+}

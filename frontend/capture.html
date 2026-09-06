@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Legal Metrology - Capture & Upload</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <header class="navbar">
+    <a href="capture.html" class="brand">
+      <div class="brand-icon">⚖️</div>
+      <span>LegalMetrology.AI</span>
+    </a>
+    <nav class="nav-links">
+      <a href="capture.html" class="nav-link active">Capture Evidence</a>
+      <a href="dashboard.html" class="nav-link">Dashboard & Verdicts</a>
+    </nav>
+  </header>
+
+  <main class="container">
+    <div class="header-section">
+      <h1 class="header-title">Package Inspection Capture</h1>
+      <p class="header-desc">Capture or upload multi-panel packaging photos for real-time quality verification and OCR declaration extraction.</p>
+    </div>
+
+    <div class="grid-2">
+      <!-- Capture & Upload Box -->
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">1. Camera / Photo Capture</h2>
+          <span class="badge" id="sessionBadge">Session: Initializing...</span>
+        </div>
+
+        <div class="camera-box" id="cameraContainer">
+          <video id="cameraVideo" autoplay playsinline muted></video>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="panelSelect">Package Panel / Side</label>
+          <select id="panelSelect" class="form-control">
+            <option value="front">Principal Display Panel (Front)</option>
+            <option value="back">Back Panel (Nutrition / Ingredients / Mfg)</option>
+            <option value="top">Top Panel</option>
+            <option value="bottom">Bottom Panel</option>
+            <option value="left">Left Side Panel</option>
+            <option value="right">Right Side Panel</option>
+            <option value="general">General / Perspective View</option>
+          </select>
+        </div>
+
+        <div style="display: flex; gap: 0.75rem; margin-bottom: 1.25rem;">
+          <button id="captureBtn" class="btn btn-primary" style="flex: 1;">📸 Capture Photo</button>
+          <label class="btn btn-secondary" style="flex: 1; cursor: pointer;">
+            📁 Upload File <input type="file" id="fileInput" accept="image/*" style="display: none;">
+          </label>
+        </div>
+
+        <div id="qualityResult" style="display: none; padding: 1rem; border-radius: var(--radius-sm); background: var(--bg-glass); border: 1px solid var(--border-subtle);">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <strong style="font-size: 0.9rem;">Quality Assessment</strong>
+            <span id="qualityStatusBadge" class="badge">Checking</span>
+          </div>
+          <p id="qualityDetails" style="font-size: 0.85rem; color: var(--text-secondary);"></p>
+        </div>
+      </div>
+
+      <!-- Live Extraction & Evidence Coverage -->
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">2. Evidence & Declarations</h2>
+          <button id="evaluateBtn" class="btn btn-primary" style="font-size: 0.85rem; padding: 0.4rem 0.8rem;">Evaluate Compliance</button>
+        </div>
+
+        <div>
+          <div style="display: flex; justify-content: space-between; font-size: 0.875rem; margin-bottom: 0.25rem;">
+            <span>Evidence Coverage</span>
+            <span id="coveragePctText">0%</span>
+          </div>
+          <div class="progress-bar-bg">
+            <div id="coverageBar" class="progress-bar-fill" style="width: 0%;"></div>
+          </div>
+        </div>
+
+        <div style="margin-top: 1.5rem;">
+          <h3 style="font-size: 0.95rem; margin-bottom: 0.75rem; color: var(--text-secondary);">Detected Declarations</h3>
+          <div id="declarationsList" style="display: flex; flex-direction: column; gap: 0.5rem;">
+            <p style="color: var(--text-muted); font-size: 0.875rem;">No declarations extracted yet. Capture or upload panel images to inspect.</p>
+          </div>
+        </div>
+
+        <div style="margin-top: 1.5rem;">
+          <h3 style="font-size: 0.95rem; margin-bottom: 0.75rem; color: var(--text-secondary);">Captured Panels (<span id="panelCount">0</span>)</h3>
+          <div id="panelsGrid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem;">
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="assets/app.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", async () => {
+      initCamera("cameraVideo");
+      
+      if (!currentSessionId) {
+        const sess = await createSession();
+        if (sess) {
+          document.getElementById("sessionBadge").innerText = sess.session_id.substring(0, 13) + "...";
+        }
+      } else {
+        document.getElementById("sessionBadge").innerText = currentSessionId.substring(0, 13) + "...";
+        refreshSessionView();
+      }
+
+      document.getElementById("captureBtn").addEventListener("click", async () => {
+        const blob = await captureVideoFrame("cameraVideo");
+        if (!blob) return alert("Could not capture frame from camera");
+        handleUpload(blob);
+      });
+
+      document.getElementById("fileInput").addEventListener("change", (e) => {
+        const file = e.target.files[0];
+        if (file) handleUpload(file);
+      });
+
+      document.getElementById("evaluateBtn").addEventListener("click", async () => {
+        try {
+          const evalResult = await evaluateSession();
+          if (evalResult) {
+            window.location.href = `dashboard.html?session_id=${evalResult.session_id}`;
+          }
+        } catch (err) {
+          alert("Evaluation failed: " + err.message);
+        }
+      });
+    });
+
+    async function handleUpload(fileBlob) {
+      const panelType = document.getElementById("panelSelect").value;
+      try {
+        const res = await uploadPanel(fileBlob, panelType);
+        
+        // Update Quality Box
+        const qualityBox = document.getElementById("qualityResult");
+        const statusBadge = document.getElementById("qualityStatusBadge");
+        const qualityDetails = document.getElementById("qualityDetails");
+        qualityBox.style.display = "block";
+
+        if (res.quality.is_acceptable) {
+          statusBadge.className = "badge badge-pass";
+          statusBadge.innerText = "PASSED";
+          qualityDetails.innerText = `Blur: ${res.quality.blur_score} | Brightness: ${res.quality.brightness_score}`;
+        } else {
+          statusBadge.className = "badge badge-fail";
+          statusBadge.innerText = "WARNING / REJECTED";
+          qualityDetails.innerText = res.quality.rejection_reasons.join(" | ");
+        }
+
+        refreshSessionView();
+      } catch (err) {
+        alert("Upload error: " + err.message);
+      }
+    }
+
+    async function refreshSessionView() {
+      if (!currentSessionId) return;
+      const sess = await fetchSession(currentSessionId);
+      if (!sess) return;
+
+      // Coverage
+      const pct = sess.coverage ? sess.coverage.coverage_percentage : 0;
+      document.getElementById("coveragePctText").innerText = `${pct}%`;
+      document.getElementById("coverageBar").style.width = `${pct}%`;
+
+      // Declarations
+      const listEl = document.getElementById("declarationsList");
+      listEl.innerHTML = "";
+      const declKeys = Object.keys(sess.declarations || {});
+      if (declKeys.length === 0) {
+        listEl.innerHTML = `<p style="color: var(--text-muted); font-size: 0.875rem;">No declarations extracted yet.</p>`;
+      } else {
+        declKeys.forEach(k => {
+          const item = sess.declarations[k];
+          const div = document.createElement("div");
+          div.style.padding = "0.5rem 0.75rem";
+          div.style.background = "var(--bg-glass)";
+          div.style.borderRadius = "var(--radius-sm)";
+          div.style.display = "flex";
+          div.style.justifyContent = "space-between";
+          div.style.fontSize = "0.875rem";
+          div.innerHTML = `<strong>${k}</strong> <span>${item.raw_text}</span>`;
+          listEl.appendChild(div);
+        });
+      }
+
+      // Panels
+      document.getElementById("panelCount").innerText = (sess.images || []).length;
+    }
+  </script>
+</body>
+</html>
