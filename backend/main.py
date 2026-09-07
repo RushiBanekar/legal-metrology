@@ -133,3 +133,20 @@ def get_session(session_id: str):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/sessions")
+def list_sessions():
+    sessions = db.get_all_sessions()
+    # Return a lightweight summary, not full image/OCR payloads
+    return [
+        {
+            "session_id": s["session_id"],
+            "product_identifier": s["product_identifier"],
+            "category": s["category"],
+            "created_at": s["created_at"],
+            "image_count": len(s["images"]),
+            "verdict": s["last_evaluation"]["verdict"] if s["last_evaluation"] else None,
+        }
+        for s in sessions
+    ]

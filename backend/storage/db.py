@@ -65,3 +65,6 @@ def save_evaluation(session_id: str, evaluation: dict):
     with _lock:
         _sessions[session_id]["last_evaluation"] = evaluation
         _persist()
+
+def get_all_sessions() -> list:
+    return list(_sessions.values())
